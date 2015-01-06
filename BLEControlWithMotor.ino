@@ -1,3 +1,8 @@
+#include <EEPROM.h>
+
+#include <RBL_nRF8001.h>
+#include <RBL_services.h>
+
 /*
 
 Copyright (c) 2012, 2013 RedBearLab
@@ -41,6 +46,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 const int stepsPerRevolution = 512;
 const float SpeedRPM = 50;
 
+//SLZ::
+//static bool bonded_first_time = true;
+
 byte pin_mode[TOTAL_PINS];
 byte pin_state[TOTAL_PINS];
 byte pin_pwm[TOTAL_PINS];
@@ -53,6 +61,7 @@ int gpio_coil1 = 3;
 int gpio_coil2 = 4;
 int gpio_coil3 = 5;
 int gpio_coil4 = 6;
+int eeprom_reset_pin = 7;
 
 int             LockControlPin = 2;
 int 		delayFactor = 1;  // keep constant rpm even with microstepping
@@ -121,6 +130,19 @@ void setup()
   // Set your BLE Shield name here, max. length 10
   //ble_set_name("My Name");
   
+  pinMode(eeprom_reset_pin, INPUT); //Pin #7 on Arduino -> PAIRING CLEAR pin: Connect to 3.3v to clear the pairing
+  byte eeprom_pin_value = digitalRead(eeprom_reset_pin);
+  if (0x0 == eeprom_pin_value)
+  {
+    //Clear the pairing
+    Serial.println(F("Pairing cleared. Remove the wire on Pin 7 and reset the board for normal operation."));
+    //Address. Value
+    EEPROM.write(0, 0);
+    while(1) {};
+  }
+
+  //Initialize the state of the bond
+  //aci_state.bonded = ACI_BOND_STATUS_FAILED;
   // Init. and start BLE library.
   ble_begin();
 }
