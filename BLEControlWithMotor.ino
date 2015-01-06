@@ -37,8 +37,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 #define SERVO                   0x04 // digital pin in Servo output mode
 
 //SLZ: Number of steps to rotate for opening/closing the lock
-#define LOCK_STEPS 150
+#define LOCK_DEGREES 95;
 const int stepsPerRevolution = 512;
+const float SpeedRPM = 50;
 
 byte pin_mode[TOTAL_PINS];
 byte pin_state[TOTAL_PINS];
@@ -48,18 +49,30 @@ byte pin_servo[TOTAL_PINS];
 Servo servos[MAX_SERVOS];
 
 //SmartLivez(SLZ): Pins to be used for Running the motor
-int in1Pin = 3;
-int in2Pin = 4;
-int in3Pin = 5;
-int in4Pin = 6;
+int gpio_coil1 = 3;
+int gpio_coil2 = 4;
+int gpio_coil3 = 5;
+int gpio_coil4 = 6;
 
-int LockControlPin = 2;
+int             LockControlPin = 2;
+int 		delayFactor = 1;  // keep constant rpm even with microstepping
+unsigned int 	uSecDelay;
+int             rotation_direction; //Direction
 
 byte current_state = LOW; //SLZ: Default state of lock
 
-
+unsigned int 	lookup[10][4] = {{1,0,0,0}, 
+                                 {1,1,0,0}, 
+                                 {0,1,0,0}, 
+                                 {0,1,1,0}, 
+                                 {0,0,1,0},
+                                 {0,0,1,1},
+                                 {0,0,0,1},
+                                 {1,0,0,1},
+                                 {1,1,1,1},
+                                 {0,0,0,0}};
 //SLZ:Motor Instance 
-Stepper motor(stepsPerRevolution, in1Pin, in2Pin, in3Pin, in4Pin);
+//Stepper motor(stepsPerRevolution, gpio_coil1, gpio_coil2, gpio_coil3, gpio_coil4);
 
 
 
@@ -80,32 +93,26 @@ void setup()
     pin_state[pin] = LOW;
     
   }
-    //SLZ: setup for Motor
-    pinMode(in1Pin, OUTPUT);
-    digitalWrite(in1Pin, LOW);
-    // Save pin mode and state
-    pin_mode[in1Pin] = OUTPUT;
+    //SLZ: setup for Motor. Save pin mode and state
+    pinMode(gpio_coil1, OUTPUT);
+    pin_mode[gpio_coil1] = OUTPUT;
     
-    pinMode(in2Pin, OUTPUT);
-    digitalWrite(in2Pin, LOW);
-    // Save pin mode and state
-    pin_mode[in2Pin] = OUTPUT;
+    pinMode(gpio_coil2, OUTPUT);
+    pin_mode[gpio_coil2] = OUTPUT;
     
-    pinMode(in3Pin, OUTPUT);
-    digitalWrite(in3Pin, LOW);
-    // Save pin mode and state
-    pin_mode[in3Pin] = OUTPUT;
+    pinMode(gpio_coil3, OUTPUT);
+    pin_mode[gpio_coil3] = OUTPUT;
     
-    pinMode(in4Pin, OUTPUT);
-    digitalWrite(in4Pin, LOW);
-    // Save pin mode and state
-    pin_mode[in4Pin] = OUTPUT;
+    pinMode(gpio_coil4, OUTPUT);
+    pin_mode[gpio_coil4] = OUTPUT;
+    
+    setGPIOs(9); //start with driving all pins LOW
 
     pinMode(LockControlPin, INPUT);
     digitalWrite(LockControlPin, LOW);
     pin_mode[LockControlPin] = OUTPUT;
  
-    motor.setSpeed(30);   
+    setSpeed(SpeedRPM);   
 
   // Default pins set to 9 and 8 for REQN and RDYN
   // Set your REQN and RDYN here before ble_begin() if you need
@@ -116,6 +123,90 @@ void setup()
   
   // Init. and start BLE library.
   ble_begin();
+}
+
+
+
+//SLZ: functions to Step the motor by the number of steps
+
+void usleep(int delaytime) { //Delay in useconds. Add sleep functionality later
+delay(delaytime/1000);
+}
+
+void setSpeed(float rpm) {
+	float delayPerSec = (60/rpm)/stepsPerRevolution; // delay per step in seconds
+	uSecDelay = (int)(delayPerSec * 1000 * 1000);    // in microseconds
+        Serial.print("rpm = ");Serial.print(rpm);Serial.println();
+        Serial.print("uSecDelay = ");Serial.print(uSecDelay);Serial.println();
+
+}
+void setGPIOs(int index){
+    digitalWrite(gpio_coil1, lookup[index][0]);
+    digitalWrite(gpio_coil2, lookup[index][1]);
+    digitalWrite(gpio_coil3, lookup[index][2]);
+    digitalWrite(gpio_coil4, lookup[index][3]);
+}
+
+void step(int numberOfSteps){
+    Serial.print("Doing ");Serial.print(numberOfSteps);Serial.print(" steps and going to sleep for ");Serial.println(uSecDelay/delayFactor);
+
+    int sleepDelay = uSecDelay/delayFactor;
+    setGPIOs(9); //start with driving all pins LOW
+
+	for(int i=0; i<numberOfSteps; i++) {
+		if (rotation_direction==0) { //clockwise
+			for(int j=0; j<8; j++) {
+				setGPIOs(j);
+				usleep(sleepDelay);
+			}
+		} else { // counter-clockwise
+			for(int j=7; j>=0; j--) {
+				setGPIOs(j);
+				usleep(sleepDelay);
+			}
+		}
+	}
+        
+        setGPIOs(9); //end with driving all pins LOW
+	usleep (1); // sleep for 1us
+}
+
+void rotate(int degrees_in, int direction_in){
+	rotation_direction  = direction_in;
+	float degreesPerStep = 360.0f/stepsPerRevolution;
+	int numberOfSteps = degrees_in/degreesPerStep;
+	Serial.print( "The number of steps is ");Serial.print(numberOfSteps);Serial.println();
+	Serial.print( "The delay factor is ");Serial.print(delayFactor);Serial.println();
+	step(numberOfSteps*delayFactor);
+}
+
+byte lockreaction(byte state)
+{
+  Serial.print("Inside the lockreaction function call. Current_state =");Serial.print(current_state); Serial.print(state);  Serial.println();
+  
+  if((current_state==LOW) && (state==HIGH))
+    {
+       rotate(95, 0);
+       current_state = HIGH;
+       Serial.println(" Inside the lockreaction function call:LOCK");
+       Serial.print(current_state); Serial.print(state);  Serial.println();
+       delay(500);
+    }
+      else if((current_state=HIGH) && (state==LOW))
+    {
+       rotate(95, 1);
+       current_state = LOW;
+       Serial.println(" Inside the lockreaction function call:UNLOCK");
+       Serial.print(current_state); Serial.print(state);  Serial.println();    
+       delay(500);
+     }   
+  else    
+    {
+      Serial.println("The Current state of Lock and request state are same. State Value = ");
+      Serial.print(state);
+      Serial.println();
+    }
+
 }
 
 static byte buf_len = 0;
@@ -129,50 +220,17 @@ void ble_write_string(byte *bytes, uint8_t len)
     
     buf_len = 0;
   }
-  
   for (int j = 0; j < len; j++)
   {
     ble_write(bytes[j]);
     buf_len++;
   }
-    
   if (buf_len == 20)
   {
     for (int j = 0; j < 15000; j++)
       ble_do_events();
-    
     buf_len = 0;
   }  
-}
-
-byte lockreaction(byte state)
-{
-  Serial.println(" Inside the lockreaction function call. Current_state =");
-  Serial.print(current_state); Serial.print(state);  Serial.println();
-  
-  if((current_state==LOW) && (state==HIGH))
-    {
-       motor.step(stepsPerRevolution);
-       current_state = HIGH;
-       Serial.println(" Inside the lockreaction function call:LOCK");
-       Serial.print(current_state); Serial.print(state);  Serial.println();
-        delay(500);
-    }
-      else if((current_state=HIGH) && (state==LOW))
-    {
-       motor.step(-stepsPerRevolution);
-       current_state = LOW;
-       Serial.println(" Inside the lockreaction function call:UNLOCK");
-       Serial.print(current_state); Serial.print(state);  Serial.println();    
-       delay(500);
-     }   
-  else    
-    {
-      Serial.println("The Current state of Lock and request state are same. State Value = ");
-      Serial.print(state);
-      Serial.println();
-    }
-
 }
 
 byte reportDigitalInput()
@@ -420,11 +478,7 @@ void loop()
           byte state = ble_read();
           
           digitalWrite(pin, state);
-            Serial.println(" Printing the value of the Pin, state: ");
-            Serial.print(pin);
-            Serial.print("  and ");
-            Serial.print(state);
-            Serial.println();
+            Serial.print(" Printing the value of the Pin, state: "); Serial.print(pin);Serial.print(" and "); Serial.print(state);Serial.println();
           if (pin==LockControlPin) //SLZ: In case the Person is controlling the Lock pin, call the lock function.
                {
                  Serial.println(" Inside the function call if loop ");
